@@ -302,11 +302,41 @@ def film_details():
 
     return jsonify({'film_details': details})
 
-# - rent a film out to a customer
+# [X] rent a film out to a customer
+@app.route('/rentFilm', methods=['POST'])
+def rent_film():
+    con = connect_to_db()
+    cursor = con.cursor()
+
+    data = request.json
+    customer_id = data.get('customer_id')
+    film_id = data.get('film_id')
+
+    if not customer_id or not film_id:
+        return jsonify({"error": "Missing customer ID or film ID"}), 400
+    
+    try:
+        query = """
+        INSERT INTO rental (inventory_id, customer_id, staff_id, rental_date)
+        SELECT i.inventory_id, %s, 1, NOW()
+        FROM inventory i
+        LEFT JOIN rental r ON i.inventory_id = r.inventory_id
+        JOIN film f ON i.film_id = f.film_id
+        WHERE f.film_id = %s 
+        LIMIT 1;
+        """
+        cursor.execute(query, (customer_id, film_id))
+        con.commit()
+
+        cursor.close()
+        return jsonify({"message": "Movie rented successfully!"})
+    
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 #--------------------CUSTOMER PAGE--------------------------------
 
-# - view a list of all customers (Pref. using pagination)
+# [X] view a list of all customers (Pref. using pagination)
 @app.route('/customerList', methods=['GET'])
 def customer_list():
     con = connect_to_db()
@@ -325,12 +355,187 @@ def customer_list():
 
     return jsonify({"customers": table})
 
-# -  the ability to filter/search customers by their customer id, first name or last name.
-# -  add a new customer
-# -  edit a customer’s details
-# -  delete a customer if they no longer wish to patron at store
-# -  view customer details and see their past and present rental history
+# [X]  the ability to filter/search customers by their customer id, first name or last name. 
+
+# [X]  add a new customer
+@app.route('/addCustomer', methods=['POST'])
+def add_customer():
+    con = connect_to_db()
+    cursor = con.cursor()
+
+    data = request.json
+    first_name = data.get('first_name')
+    last_name = data.get('last_name')
+    email = data.get('email')
+
+    if not first_name or not last_name or not email:
+        return jsonify({"error": "Missing name or email"}), 400
+    
+    try:
+        query = """
+        insert into customer (store_id, first_name, last_name, email, address_id) values (1, %s, %s, %s, 1);
+        """
+        cursor.execute(query, (first_name, last_name, email))
+        con.commit()
+        cursor.close()
+        return jsonify({"message": "Customer added successfully!"})
+    
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# [X]  edit a customer’s details
+@app.route('/editCustomer/<int:customer_id>', methods=['PUT'])
+def edit_customer(customer_id):
+    con = connect_to_db()
+    cursor = con.cursor()
+
+    data = request.json
+    first_name = data.get('first_name')
+    last_name = data.get('last_name')
+    email = data.get('email')
+
+    if not first_name or not last_name or not email:
+        return jsonify({"error": "Missing name or email"}), 400
+    
+    try:
+        query = """
+        UPDATE customer SET first_name=%s, last_name=%s, email=%s WHERE customer_id=%s;
+        """
+        cursor.execute(query, (first_name, last_name, email, customer_id))
+        con.commit()
+        cursor.close()
+        return jsonify({"message": "Customer updated successfully!"})
+    
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# [x]  delete a customer if they no longer wish to patron at store
+@app.route('/deleteCustomer/<int:customer_id>', methods=['DELETE'])
+def delete_customer(customer_id):
+    con = connect_to_db()
+    cursor = con.cursor()
+
+    try:
+        query = """
+        DELETE FROM customer WHERE customer_id=%s;
+        """
+        cursor.execute(query, (customer_id,))
+        con.commit()
+        cursor.close()
+        return jsonify({"message": "Customer deleted successfully!"})
+    
+    except Exception as e:
+        print(f"Error deleting customer: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+# [X]  view customer details and see their past and present rental history
+#customer details
+@app.route('/customerDetails', methods=['GET'])
+def view_customer():
+    con = connect_to_db()
+
+    customer_id = request.args.get('id')  # Get the 'id' query parameter
+    
+    cursor = con.cursor()
+    
+    query = """
+    SELECT first_name, last_name, email, create_date
+    FROM customer
+    WHERE customer_id = %s;
+    """
+    cursor.execute(query, (customer_id,))
+    
+    results = cursor.fetchall()
+    cursor.close()
+
+    details = [{"first_name": result[0], "last_name": result[1], "email": result[2],
+                "create_date": result[3]} 
+               for result in results]
+
+    return jsonify({'customer_details': details})
+
+#---
+@app.route('/customerDetails2', methods=['GET'])
+def view_customer2():
+    con = connect_to_db()
+
+    customer_id = request.args.get('id')  # Get the 'id' query parameter
+    
+    cursor = con.cursor()
+    
+    query = """
+    SELECT first_name, last_name, email, create_date
+    FROM customer
+    WHERE customer_id = %s;
+    """
+    cursor.execute(query, (customer_id,))
+    
+    results = cursor.fetchall()
+    cursor.close()
+
+    details = [{"first_name": result[0], "last_name": result[1], "email": result[2],
+                "create_date": result[3]} 
+               for result in results]
+
+    return jsonify({'customer_details': details})
+
+#rental history
+@app.route('/viewRented', methods=['GET'])
+def view_rented():
+    con = connect_to_db()
+
+    customer_id = request.args.get('id')  # Get the 'id' query parameter
+    
+    cursor = con.cursor()
+    
+    query = """
+    SELECT rental.rental_id, film.title, rental.inventory_id, rental.rental_date, 
+    rental.return_date
+    FROM rental
+    JOIN inventory ON inventory.inventory_id = rental.inventory_id
+    JOIN film ON film.film_id = inventory.film_id
+    WHERE rental.customer_id = %s
+    GROUP BY rental.rental_id, film.title, rental.inventory_id, rental.rental_date, 
+    rental.return_date;
+    """
+    cursor.execute(query, (customer_id,))
+    
+    results = cursor.fetchall()
+    cursor.close()
+
+    details = [{"rental_id": result[0], "title": result[1], "inventory_id": result[2],
+                "rental_date": result[3], "return_date": result[4]} 
+               for result in results]
+
+    return jsonify({'rental_details': details})
+
 # - indicate that a customer has returned a rented movie
+#return
+@app.route('/returnFilm/<int:rental_id>/<int:customer_id>', methods=['PUT'])
+def return_film(rental_id, customer_id):
+    con = connect_to_db()
+    cursor = con.cursor()
+
+    try:
+        query = """
+        UPDATE rental
+        SET return_date = NOW()
+        WHERE rental_id = %s
+        AND customer_id = %s
+        AND return_date IS NULL;
+        """
+        cursor.execute(query, (rental_id, customer_id))
+        con.commit()
+
+        if cursor.rowcount > 0:
+            return jsonify({"message": "Film returned successfully!"})
+        else:
+            return jsonify({"error": "No current rental found for the given customer and film."}), 404
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 #------------------------------------------------------------------
 if __name__=="__main__":
     print("connecting to DB...")
